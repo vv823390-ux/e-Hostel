@@ -1,0 +1,289 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  TEACHER
+  HOD
+  DEPUTY_WARDEN
+  WARDEN
+  PRINCIPAL
+  FOOD_MANAGER
+  GATE_SCANNER
+}
+
+enum LeaveStatus {
+  PENDING_TEACHER
+  PENDING_HOD
+  PENDING_DEPUTY_WARDEN
+  PENDING_WARDEN
+  APPROVED
+  REJECTED
+}
+
+enum StepStatus {
+  WAITING
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+}
+
+enum ComplaintType {
+  DISCIPLINE
+  RAGGING
+  MAINTENANCE
+  FOOD
+  ABSENCE
+  OTHER
+}
+
+model User {
+  id           String        @id @default(uuid())
+  username     String        @unique
+  passwordHash String
+  fullName     String
+  role         Role
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  studentProfile StudentProfile?
+  staffProfile   StaffProfile?
+  sessions       Session[]
+  auditLogs      AuditLog[]
+
+  @@index([role])
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  code        String   @unique // e.g. CSEA, CSEB, AIML, CYBER, AERO, AGRI, CIVIL, FOOD
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  students StudentProfile[]
+  staff    StaffProfile[]
+}
+
+model HostelBlock {
+  id        String       @id @default(uuid())
+  name      String       @unique // e.g. Cauvery Block, Bhavani Block, Amaravathi Block
+  createdAt DateTime     @default(now())
+
+  rooms    HostelRoom[]
+  students StudentProfile[]
+  staff    StaffProfile[]
+}
+
+model HostelRoom {
+  id        String      @id @default(uuid())
+  blockId   String
+  block     HostelBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  roomNo    String
+  capacity  Int         @default(4)
+  createdAt DateTime    @default(now())
+
+  students StudentProfile[]
+
+  @@unique([blockId, roomNo])
+}
+
+model StudentProfile {
+  id           String      @id @default(uuid())
+  userId       String      @unique
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  registerNo   String      @unique
+  departmentId String
+  department   Department  @relation(fields: [departmentId], references: [id])
+  academicYear String      // e.g. 1st Year, 2nd Year, 3rd Year, 4th Year
+  hostelId     String
+  hostel       HostelBlock @relation(fields: [hostelId], references: [id])
+  roomId       String?
+  room         HostelRoom? @relation(fields: [roomId], references: [id])
+  roomNoText   String?
+  parentName   String?
+  parentPhone  String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  leaves       LeaveApplication[]
+  attendances  HostelAttendance[]
+  complaints   Complaint[]
+
+  @@index([departmentId])
+  @@index([hostelId])
+}
+
+model StaffProfile {
+  id           String       @id @default(uuid())
+  userId       String       @unique
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  departmentId String?
+  department   Department?  @relation(fields: [departmentId], references: [id])
+  hostelId     String?
+  hostel       HostelBlock? @relation(fields: [hostelId], references: [id])
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  approvals    LeaveApproval[]
+  complaints   Complaint[]
+
+  @@index([departmentId])
+  @@index([hostelId])
+}
+
+model LeaveApplication {
+  id           String      @id @default(uuid())
+  appNo        String      @unique // e.g. APP-2026-008142
+  studentId    String
+  student      StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  leaveType    String      // Home Visit, Emergency, Medical, Academic OD, Personal
+  reason       String
+  fromDate     DateTime
+  toDate       DateTime
+  status       LeaveStatus @default(PENDING_TEACHER)
+  appliedAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  rejectionRole   String?
+  rejectionBy     String?
+  rejectionReason String?
+  rejectedAt      DateTime?
+
+  gatePass     GatePass?
+  approvals    LeaveApproval[]
+
+  @@index([studentId])
+  @@index([status])
+}
+
+model LeaveApproval {
+  id            String           @id @default(uuid())
+  leaveId       String
+  leave         LeaveApplication @relation(fields: [leaveId], references: [id], onDelete: Cascade)
+  stepRole      Role             // TEACHER, HOD, DEPUTY_WARDEN, WARDEN
+  status        StepStatus       @default(PENDING)
+  actionById    String?
+  actionBy      StaffProfile?    @relation(fields: [actionById], references: [id])
+  actionByName  String?
+  actionComment String?
+  actionAt      DateTime?
+  createdAt     DateTime         @default(now())
+
+  @@unique([leaveId, stepRole])
+  @@index([leaveId])
+}
+
+model GatePass {
+  id          String           @id @default(uuid())
+  passNo      String           @unique // e.g. GP-2026-008142
+  leaveId     String           @unique
+  leave       LeaveApplication @relation(fields: [leaveId], references: [id], onDelete: Cascade)
+  qrPayload   String           // Full JSON string with digital auth signature
+  isOut       Boolean          @default(false)
+  isIn        Boolean          @default(false)
+  outAt       DateTime?
+  inAt        DateTime?
+  generatedAt DateTime         @default(now())
+
+  gateScans   GateScanLog[]
+}
+
+model GateScanLog {
+  id         String    @id @default(uuid())
+  passId     String
+  pass       GatePass  @relation(fields: [passId], references: [id], onDelete: Cascade)
+  action     String    // OUT or IN
+  scannedAt  DateTime  @default(now())
+  scannedBy  String?
+  notes      String?
+
+  @@index([passId])
+}
+
+model HostelAttendance {
+  id         String           @id @default(uuid())
+  studentId  String
+  student    StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date       DateTime         // Date of attendance
+  status     AttendanceStatus
+  remarks    String?
+  markedBy   String?
+  createdAt  DateTime         @default(now())
+
+  @@unique([studentId, date])
+  @@index([date])
+}
+
+model Complaint {
+  id           String         @id @default(uuid())
+  studentId    String?
+  student      StudentProfile? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  studentName  String
+  registerNo   String?
+  department   String?
+  type         ComplaintType
+  description  String
+  date         DateTime
+  recordedById String?
+  recordedBy   StaffProfile?  @relation(fields: [recordedById], references: [id])
+  createdAt    DateTime       @default(now())
+
+  @@index([type])
+}
+
+model MessMenu {
+  id        String   @id @default(uuid())
+  day       String   @default("TODAY")
+  breakfast String
+  lunch     String
+  snacks    String
+  dinner    String
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
+
+model StaffCommunication {
+  id        String   @id @default(uuid())
+  sender    String
+  role      String
+  subject   String
+  message   String
+  priority  String   @default("NORMAL")
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
